@@ -1,11 +1,13 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { Session } from './store.mjs';
-import { getHost, agySpawnSpec, sshCapture, loginHint, CWD_MARK, PID_MARK } from './hosts.mjs';
+import { getHost, agySpawnSpec, sshCapture, loginHint, writeLocalRoProfile, CWD_MARK, PID_MARK, RO_PROFILE } from './hosts.mjs';
 import { Rpc } from './acp.mjs';
 import { IS_WIN, killTree, oneLine, fmtDur, sleep, isAlive } from './util.mjs';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
+const RO_NOTE = '[agy-dispatch: this session is read-only. Editing files is denied. Shell commands are allowed only if they are plain read-only ones (ls, cat, rg/grep, git status/diff/log/show), one per call, without &&, ;, | or redirection; anything else is denied. Work with read-only tools and say what you would change instead of changing it.]';
+const RO_CONTINUE = '[agy-dispatch: that action was denied because this session is read-only. Carry on with read-only tools (file viewing and search; plain read-only shell commands one per call, without &&, ;, | or redirection), then give your answer, including what you could not do.]';
 const RAW_CAP = 20 * 1024 * 1024;
 const AGY_PRIVATE = /[\\/]\.gemini[\\/]antigravity-cli[\\/]/i; // plan/brain artifacts agy keeps for itself
 const AUTH_RE = /Authentication required|Please visit the URL to log in|paste the authorization code|Please sign in/i;
@@ -14,6 +16,17 @@ function summarizeArgs(a) {
   if (!a || typeof a !== 'object') return '';
   const v = a.CommandLine || a.Command || a.Path || a.TargetFile || a.AbsolutePath || a.Query || a.Url || a.SearchPath || a.DirectoryPath || Object.values(a).find((x) => typeof x === 'string');
   return oneLine(v || '', 160);
+}
+
+// Commands a read-only session may run: one plain command, no shell operators, from a short list.
+const SAFE_CMD = /^(ls|pwd|cat|head|tail|wc|stat|file|tree|du|df|which|whoami|uname|date|echo|rg|grep|egrep|fgrep|dir|type|Get-ChildItem|Get-Content|Get-Location|Select-String|git (status|diff|log|show|blame|branch|ls-files|rev-parse|grep|remote -v|config --get|describe|shortlog))(\s|$)/;
+const SHELL_META = /[;&|<>`$(){}\n\r]/;
+export function isSafeReadCommand(cmd) {
+  const c = String(cmd || '').trim();
+  if (!c || SHELL_META.test(c)) return false;
+  if (/\s-(delete|exec|execdir|ok|fprint\S*)\b|\s--output(=|\s)|\s-o\s|\s--pre(-glob)?(=|\s)|\s-O\b|--open-files-in-pager|\s--ext-diff\b/.test(c)) return false;
+  if (/^git branch\b/.test(c) && !/^git branch(\s+(-a|-r|-v|-vv|--all|--remotes|--list|--show-current|--contains\s+\S+|--merged|--no-merged))*\s*$/.test(c)) return false;
+  return SAFE_CMD.test(c);
 }
 
 function isWorkspaceWrite(u) {
@@ -55,6 +68,9 @@ export async function runBroker(id) {
   let lastActivity = Date.now(), lastBusyAt = Date.now(), lastHeartbeat = 0;
   let cancelAt = 0, killing = false, stopping = false, processing = false, replaying = false;
   let restarts = 0, connectGen = 0, reqNo = prev.reqNo || 0;
+  let orphanPid = prev.remotePid || null; // from an earlier broker of this session
+  let lastTick = Date.now();
+  let deniedThisTurn = 0, nudged = false;
   const tools = new Map();
   const reqs = new Map();
   const queue = [];
@@ -82,6 +98,14 @@ export async function runBroker(id) {
   const waitFor = async (pred, ms) => { const end = Date.now() + ms; while (!pred() && Date.now() < end) await sleep(100); return pred(); };
   const sel = (o) => ({ outcome: { outcome: 'selected', optionId: o.optionId } });
 
+  async function killOrphan() {
+    const pid = orphanPid;
+    orphanPid = null;
+    if (!pid || host.local || !host.ssh) return;
+    const script = host.os === 'windows' ? `taskkill /PID ${pid} /T /F 2>&1 | Out-Null` : `kill -9 -- -${pid} 2>/dev/null || kill -9 ${pid} 2>/dev/null; true`;
+    try { await sshCapture(host, script, { timeoutMs: 20000 }); s.log('killed orphan remote pid ' + pid); } catch {}
+  }
+
   function killChild() {
     const c = child;
     if (!c || childExited) return;
@@ -98,7 +122,11 @@ export async function runBroker(id) {
     if (meta.sandbox) agyArgs.push('--sandbox');
     if (meta.yolo) agyArgs.push('--dangerously-skip-permissions');
     for (const d of meta.addDirs || []) agyArgs.push('--add-dir', d);
-    const spec = agySpawnSpec(host, agyArgs, meta.cwd);
+    if (meta.readOnly) {
+      agyArgs.push('--cli_dir_name', RO_PROFILE);
+      if (host.local) writeLocalRoProfile();
+    }
+    const spec = agySpawnSpec(host, agyArgs, meta.cwd, { roProfile: !!meta.readOnly });
     s.log(`spawn ${spec.cmd} ${JSON.stringify(spec.args)}`);
     let gotCwd;
     const cwdKnown = new Promise((r) => (gotCwd = r));
@@ -114,7 +142,7 @@ export async function runBroker(id) {
       const m = d.match(new RegExp(CWD_MARK + '(.+)'));
       if (m) gotCwd(m[1].trim());
       const p = d.match(new RegExp(PID_MARK + '(\\d+)'));
-      if (p) remotePid = Number(p[1]);
+      if (p) { remotePid = Number(p[1]); save({ remotePid }); }
       if (AUTH_RE.test(d)) authProblem = true;
     });
     c.on('exit', (code, signal) => { if (child === c) childExited = true; onExit(gen, code, signal); });
@@ -154,6 +182,7 @@ export async function runBroker(id) {
 
   function onExit(gen, code, signal) {
     if (gen !== connectGen) return;
+    orphanPid = remotePid; // the remote agy may outlive a dropped SSH link; killed before reconnecting
     const tail = oneLine(stderrTail.split('\n').filter((l) => !l.includes(CWD_MARK) && !l.includes(PID_MARK)).slice(-4).join(' | '), 400);
     try { rpc?.close(`agy exited (code ${code}${signal ? ', ' + signal : ''})`); } catch {}
     if (stopping || status === 'starting' || status === 'recovering') return;
@@ -171,6 +200,7 @@ export async function runBroker(id) {
     }
     restarts++;
     status = 'recovering'; save();
+    await killOrphan();
     ev('recovering', { attempt: restarts, reason });
     try {
       await connect(true);
@@ -189,20 +219,37 @@ export async function runBroker(id) {
     if (fresh) {
       turn++; turnStartedAt = Date.now(); turnText = ''; turnPrompts = []; lastStop = null; lastUsage = null;
       turnQuestion = null; turnNotes = []; cancelAt = 0; killing = false; lastActivity = Date.now();
+      deniedThisTurn = 0; nudged = false;
       status = 'running';
       ev('turn_start');
     }
     turnPrompts.push(text);
-    inflight++;
     save();
     ev('user', { text, cmdId, injected: !fresh });
+    const wire = meta.readOnly && !meta.roNoted ? RO_NOTE + '\n\n' + text : text;
+    if (meta.readOnly && !meta.roNoted) meta = s.setMeta({ roNoted: true });
+    sendPrompt(wire);
+  }
+
+  function sendPrompt(text) {
+    inflight++;
+    save();
     rpc.call('session/prompt', { sessionId: agySid, prompt: [{ type: 'text', text }] })
       .then((r) => { lastStop = r?.stopReason || 'end_turn'; if (r?.usage) lastUsage = r.usage; return false; },
         (e) => { lastStop = e.closed ? 'agent_exited' : 'error'; turnNotes.push('prompt failed: ' + e.message); if (!e.closed) ev('error', { message: e.message }); return !!e.closed; })
       .then(async (closed) => {
         if (closed) await waitFor(() => childExited, 2000); // let agent_exit (with the exit code) land before turn_end
         inflight--;
-        if (inflight === 0) endTurn(); else save();
+        if (inflight > 0) { save(); return; }
+        // agy stops its turn when an action is denied; in a read-only session nudge it once to carry on.
+        if (meta.readOnly && deniedThisTurn && !nudged && !cancelAt && lastStop === 'end_turn' && !stopping && rpc && !rpc.closed) {
+          nudged = true;
+          turnNotes.push('nudged agy to continue read-only after a denial');
+          ev('nudge', { denied: deniedThisTurn });
+          sendPrompt(RO_CONTINUE);
+          return;
+        }
+        endTurn();
       });
   }
 
@@ -254,11 +301,6 @@ export async function runBroker(id) {
         if (name === 'ask_question') { turnQuestion = a.questions || []; ev('question', { questions: turnQuestion }); break; }
         tools.set(u.toolCallId, { name, title: oneLine(u.title || summarizeArgs(a), 200), kind: u.kind, startedAt: Date.now() });
         ev('tool', { id: u.toolCallId, name, kind: u.kind, title: oneLine(u.title || summarizeArgs(a), 200) });
-        if (meta.readOnly && isWorkspaceWrite(u)) {
-          turnNotes.push(`read-only violation: ${name} ${oneLine(u.title || '', 120)}`);
-          ev('violation', { name, title: oneLine(u.title || summarizeArgs(a), 200) });
-          cancel('read-only session attempted a write');
-        }
         save();
         break;
       }
@@ -267,6 +309,13 @@ export async function runBroker(id) {
           const t = tools.get(u.toolCallId);
           if (t) {
             tools.delete(u.toolCallId);
+            // The profile makes agy ask before writing and the broker denies it; a write that still
+            // completes means the guard failed, so stop the turn.
+            if (meta.readOnly && u.status === 'completed' && isWorkspaceWrite({ kind: u.kind || t.kind, locations: u.locations, rawInput: u.rawInput || u.args })) {
+              turnNotes.push(`read-only violation: ${t.name} ${t.title}`);
+              ev('violation', { name: t.name, title: t.title });
+              cancel('read-only session completed a write');
+            }
             const exit = u.rawOutput && u.rawOutput.exit_code;
             ev('tool_done', { id: u.toolCallId, name: t.name, title: t.title, ok: u.status === 'completed' && !exit, exit, ms: Date.now() - t.startedAt });
           }
@@ -296,7 +345,22 @@ export async function runBroker(id) {
       const tc = params.toolCall || {};
       const title = oneLine(tc.title || summarizeArgs(tc.rawInput) || tc.name || 'permission', 200);
       const pick = (...kinds) => kinds.map((k) => opts.find((o) => o.kind === k)).find(Boolean);
-      const policy = meta.readOnly ? 'deny' : meta.approve;
+      if (meta.readOnly) {
+        const a = tc.rawInput || tc.args || {};
+        const cmd = a.CommandLine || a.Command;
+        const readish = tc.kind === 'read' || tc.kind === 'search' || tc.kind === 'fetch';
+        if ((tc.kind === 'execute' && isSafeReadCommand(cmd)) || readish) {
+          const o = pick('allow_once') || opts.find((x) => x.kind && x.kind.startsWith('allow'));
+          if (o) { rpc.respond(rpcId, sel(o)); ev('permission_auto', { title, option: o.optionId }); return; }
+        }
+        const o = pick('reject_once', 'reject_always');
+        rpc.respond(rpcId, o ? sel(o) : { outcome: { outcome: 'cancelled' } });
+        turnNotes.push('read-only: denied ' + title);
+        deniedThisTurn++;
+        ev('permission_denied', { title: title + ' (read-only)' });
+        return;
+      }
+      const policy = meta.approve;
       if (policy === 'auto') {
         const o = pick('allow_once', 'allow_always') || opts[0];
         rpc.respond(rpcId, o ? sel(o) : { outcome: { outcome: 'cancelled' } });
@@ -415,6 +479,15 @@ export async function runBroker(id) {
 
   function tick() {
     const now = Date.now();
+    const gap = now - lastTick;
+    lastTick = now;
+    if (gap > 15000) {
+      // The machine slept (or the broker was frozen): don't count that time against agy.
+      const shift = gap - 1000;
+      lastActivity += shift; if (turnStartedAt) turnStartedAt += shift; if (cancelAt) cancelAt += shift;
+      for (const r of reqs.values()) r.at += shift;
+      s.log(`clock gap ${fmtDur(gap)}; watchdog timers shifted`);
+    }
     if (pendingText && (now - pendingSince > 8000 || pendingText.length > 2000)) flushText();
     if (inflight > 0 && !stopping) {
       for (const [n, r] of reqs) {
@@ -467,6 +540,7 @@ export async function runBroker(id) {
   ev('broker_start', { pid: process.pid, resume: !!agySid });
   const resume = !!agySid;
   try {
+    if (resume) await killOrphan();
     await connect(resume);
   } catch (e) {
     if (stopping) return;

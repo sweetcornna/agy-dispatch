@@ -6,7 +6,7 @@ A Claude Code plugin that drives **agy** (the Google Antigravity CLI) like a sub
 - **Live conversation**: `send` while agy is working adds the message to the current turn, and agy picks it up at its next step. `--interrupt` cancels the turn first. agy's questions and approval requests come back to Claude (`answer`).
 - **No hangs**: a watchdog cancels a turn that goes silent and kills agy if it ignores the cancel. The broker then restarts agy and reloads the conversation, and it does the same after a crash or a dropped SSH link. Unanswered approvals are denied after a timeout. A host that isn't signed in fails in seconds instead of waiting on OAuth. `wait` and `run` never block longer than `--timeout`.
 - **Nothing runs when idle**: an idle session stops its agy process after 20 minutes (parked). `send` resumes it with its memory.
-- **Read-only by default**: plan mode, approvals denied, and workspace edits cancel the turn. `--write` allows edits and commands.
+- **Enforced read-only by default**: agy runs with its own settings profile (`--cli_dir_name agy-dispatch-ro`, `request-review`), so it must ask before any edit or command. The broker denies edits and allows only plain read commands, and a write that completes anyway cancels the turn. `--write` allows edits and commands, with approvals routed to you.
 - **Several machines**: `hosts add <name> --ssh <alias>` detects the OS (Linux, macOS or Windows PowerShell) and the agy path. The wire is ASCII-only JSON, so Chinese and quotes survive PowerShell 5.1.
 
 ## Install

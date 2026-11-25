@@ -115,6 +115,10 @@ test('read-only session: approvals denied by policy and workspace writes cancel 
   const id2 = idOf(cli(['start', '--', 'permission']).out);
   const w2 = cli(['wait', id2]);
   assert.match(w2.out, /"optionId":"reject"/);
+  assert.match(w2.out, /continued read-only/, 'a denial should nudge agy to carry on');
+  const id3 = idOf(cli(['start', '--', 'rocmd']).out);
+  const w3 = cli(['wait', id3]);
+  assert.match(w3.out, /ls=allow rm=reject saw-note=true/);
   cli(['stop', '--all']);
 });
 

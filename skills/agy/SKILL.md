@@ -30,14 +30,14 @@ The first output line is `started <id> on <host> ...`. Keep the id.
 
 ## Access
 
-- Read-only is the default: agy runs in plan mode, approval requests are denied, and any workspace edit cancels the turn. Use it for questions, reviews and research.
+- Read-only is the default, and the broker enforces it. agy runs with a settings profile that makes it ask before every edit or command. The broker denies edits and allows only plain read commands (`ls`, `cat`, `rg`/`grep`, `git status/diff/log/show`, ... one per call, with no `&&`, `|`, `;` or redirection). After a denial it nudges agy once to carry on read-only. Use read-only for questions, reviews and research.
 - `--write` lets agy edit files and run commands (mode `auto`). Approval requests come to you (`--approve ask`). Add `--write` only when the user wants agy to change something.
 - `--yolo` skips agy's approvals entirely. Use it only when the user asks for it.
 - `--model <id>` picks a model (`models --host <h>` lists them). Leave it unset unless the user names one.
 
 ## Watch it live (the subagent loop)
 
-1. Start a **Monitor** on `node "${CLAUDE_PLUGIN_ROOT}/scripts/agy.mjs" watch <id>` with a description such as `agy <id> progress`. Each line is one event: `turn N started`, `agy: <text>`, `<tool>: <what>`, `steps 2/5 · now: ...`, `QUESTION`, `APPROVAL #n`, `STALL`, `turn N finished`, `parked`/`stopped`/`DEAD`. The watch ends by itself when the session stops or parks.
+1. Start a **Monitor** (`timeout_ms: 1800000`) on `node "${CLAUDE_PLUGIN_ROOT}/scripts/agy.mjs" watch <id>` with a description such as `agy <id> progress`. If the Monitor expires while the session is still running, start it again; `watch` prints only new events. Each line is one event: `turn N started`, `agy: <text>`, `<tool>: <what>`, `steps 2/5 · now: ...`, `QUESTION`, `APPROVAL #n`, `STALL`, `turn N finished`, `parked`/`stopped`/`DEAD`. The watch ends by itself when the session stops or parks.
    - If Monitor is not available, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/agy.mjs" wait <id>` with Bash `run_in_background: true`. You get one notification when the turn ends or agy needs approval. Re-arm it after each `send`.
 2. While it runs, keep doing other work. Relay only what matters to the user: questions, approvals, stalls, failures and the final result. Don't echo every tool line.
 3. On `turn N finished`, read the full reply with `node "${CLAUDE_PLUGIN_ROOT}/scripts/agy.mjs" result <id>` before you summarise or act on it. Check agy's claims (diffs, test output) like any subagent's work.

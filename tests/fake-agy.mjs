@@ -38,7 +38,9 @@ async function handle(m) {
     return;
   }
   if (method === 'session/prompt') {
-    const text = params.prompt.map((p) => p.text).join('');
+    const wireText = params.prompt.map((p) => p.text).join('');
+    const text = wireText.replace(/^\[agy-dispatch: this session is read-only[^\]]*\]\s*/, '');
+    if (/^\[agy-dispatch: that action was denied/.test(text)) { pendingPrompt = { id }; chunk('continued read-only'); pendingPrompt = null; return send({ jsonrpc: '2.0', id, result: { stopReason: 'end_turn' } }); }
     if (pendingPrompt) { // mid-turn message: finish the earlier request early, keep working (agy behaviour)
       send({ jsonrpc: '2.0', id: pendingPrompt.id, result: { stopReason: 'end_turn' } });
       pendingPrompt = { id, ignoreCancel: pendingPrompt.ignoreCancel };
@@ -67,7 +69,21 @@ async function handle(m) {
     }
     if (text.startsWith('write')) {
       upd({ sessionUpdate: 'tool_call', toolCallId: 'w1', name: 'write_file', kind: 'edit', title: 'File x.txt', locations: [{ path: process.cwd() + '/x.txt' }], status: 'in_progress' });
+      await sleep(100);
+      upd({ sessionUpdate: 'tool_call_update', toolCallId: 'w1', kind: 'edit', locations: [{ path: process.cwd() + '/x.txt' }], status: 'completed' });
       await sleep(200);
+      return done();
+    }
+    if (text.startsWith('rocmd')) {
+      const ask = async (title, cmd) => {
+        const rid = reqId++;
+        const answer = new Promise((r) => waiting.set(rid, r));
+        send({ jsonrpc: '2.0', id: rid, method: 'session/request_permission', params: { sessionId: sid, toolCall: { toolCallId: 'c' + rid, title, kind: 'execute', rawInput: { CommandLine: cmd } }, options: [{ optionId: 'allow', kind: 'allow_once', name: 'Allow' }, { optionId: 'reject', kind: 'reject_once', name: 'Reject' }] } });
+        return (await answer).outcome.optionId;
+      };
+      const a = await ask('ls -la', 'ls -la');
+      const b = await ask('rm -rf build', 'rm -rf build');
+      chunk(`ls=${a} rm=${b} saw-note=${wireText.includes('read-only')}`);
       return done();
     }
     if (text.startsWith('permission')) {

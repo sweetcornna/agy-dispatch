@@ -44,6 +44,7 @@ export function renderEvent(e, id, { verbose = false, self = 'agy.mjs' } = {}) {
       const notes = e.notes && e.notes.length ? ' · ' + oneLine(e.notes.join('; '), 200) : '';
       return `${p} turn ${e.turn} finished: ${e.stopReason} in ${fmtDur(e.ms)}, ${e.chars} chars${q}${notes} → ${self} result ${id}`;
     }
+    case 'nudge': return `${p} ${e.denied} action(s) denied (read-only); asked agy to continue read-only`;
     case 'title': return verbose ? `${p} title: ${e.title}` : null;
     case 'warn': return `${p} warning: ${e.message}`;
     case 'error': return `${p} error: ${e.message}`;

@@ -41,7 +41,9 @@ Hosts (stored in ~/.agy-dispatch/hosts.json)
 Session options (start/run)
   --host NAME        where agy runs (default: local)
   --cwd DIR          working directory on that host (default: here for local, host's cwd or ~ for remote)
-  --write            let agy edit files and run commands (default is read-only: plan mode, edits blocked)
+  --write            let agy edit files and run commands. Default is read-only: agy must ask before any
+                     edit or command; the broker denies edits and allows only plain read commands
+                     (ls, cat, rg/grep, git status/diff/log/show, ...) without shell operators
   --approve MODE     with --write: ask (default, approvals come to you) | auto | deny
   --yolo             --write plus agy's --dangerously-skip-permissions
   --mode MODE        agy mode: default | accept-edits | auto | plan
@@ -74,8 +76,8 @@ function buildMeta(args, host) {
   const write = !!(args.write || args.yolo);
   let mode = args.mode;
   if (mode && !MODES.includes(mode)) throw new UsageError(`--mode must be one of ${MODES.join(', ')}`);
-  if (!write && mode && mode !== 'plan') throw new UsageError(`--mode ${mode} lets agy edit; add --write`);
-  if (!mode) mode = write ? (args.yolo ? 'auto' : 'auto') : 'plan';
+  if (!write && mode && !['plan', 'default'].includes(mode)) throw new UsageError(`--mode ${mode} lets agy edit; add --write`);
+  if (!mode) mode = write ? 'auto' : 'default';
   const approve = args.yolo ? 'auto' : write ? (args.approve || 'ask') : 'deny';
   if (!['ask', 'auto', 'deny'].includes(approve)) throw new UsageError('--approve must be ask, auto or deny');
   if (args.model && !/^[A-Za-z0-9._:-]+$/.test(args.model)) throw new UsageError('bad --model');

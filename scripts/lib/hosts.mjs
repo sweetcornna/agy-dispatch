@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { hostsFile } from './store.mjs';
 import { IS_WIN, UsageError, posixQuote, psQuote, readJson, writeJsonAtomic } from './util.mjs';
@@ -6,6 +8,23 @@ import { IS_WIN, UsageError, posixQuote, psQuote, readJson, writeJsonAtomic } fr
 export const SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4'];
 export const CWD_MARK = 'AGY_DISPATCH_CWD=';
 export const PID_MARK = 'AGY_DISPATCH_PID=';
+
+// Read-only sessions run agy with their own settings profile (--cli_dir_name), in which agy asks
+// before every edit or command (request-review). The broker answers those requests: plain read-only
+// commands are allowed, everything else is denied. agy keeps its sign-in across profiles.
+export const RO_PROFILE = 'agy-dispatch-ro';
+export const RO_SETTINGS = JSON.stringify({
+  toolPermission: 'request-review',
+  artifactReviewPolicy: 'always-proceed',
+  allowNonWorkspaceAccess: true,
+  permissions: { allow: ['read_file(*)', 'read_url(*)'], deny: ['write_file(*)'] },
+});
+
+export function writeLocalRoProfile() {
+  const dir = path.join(os.homedir(), '.gemini', 'antigravity-cli', RO_PROFILE);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'settings.json'), RO_SETTINGS);
+}
 
 export function loadHosts() {
   const cfg = readJson(hostsFile(), null) || {};
@@ -51,7 +70,7 @@ function psPath(p) {
 
 // How to start "agy <args>" on a host. Remote commands report the resolved working directory on
 // stderr (CWD_MARK) before exec'ing agy, so the broker learns the absolute path ACP needs.
-export function agySpawnSpec(host, agyArgs, cwd) {
+export function agySpawnSpec(host, agyArgs, cwd, { roProfile = false } = {}) {
   if (host.local) {
     const override = process.env.AGY_DISPATCH_AGY_CMD ? JSON.parse(process.env.AGY_DISPATCH_AGY_CMD) : null;
     const base = override || [host.agy || 'agy'];
@@ -62,6 +81,11 @@ export function agySpawnSpec(host, agyArgs, cwd) {
   const agy = host.agy || 'agy';
   if (host.os === 'windows') {
     const script = [
+      ...(roProfile ? [
+        "$d = Join-Path $HOME '.gemini\\antigravity-cli\\" + RO_PROFILE + "'",
+        'New-Item -ItemType Directory -Force -Path $d | Out-Null',
+        "[IO.File]::WriteAllText((Join-Path $d 'settings.json'), " + psQuote(RO_SETTINGS) + ')',
+      ] : []),
       'Set-Location -LiteralPath ' + psPath(cwd) + ' -ErrorAction Stop',
       "[Console]::Error.WriteLine('" + CWD_MARK + "' + (Get-Location).Path)",
       "[Console]::Error.WriteLine('" + PID_MARK + "' + $PID)",
@@ -70,7 +94,8 @@ export function agySpawnSpec(host, agyArgs, cwd) {
     ].join('; ');
     return { cmd: 'ssh', args: [...ssh, script], remote: true };
   }
-  const script = posixCd(cwd) + ' && printf ' + posixQuote(CWD_MARK + '%s\\n') + ' "$(pwd)" >&2 && printf ' + posixQuote(PID_MARK + '%s\\n') + ' "$$" >&2 && exec ' + posixExe(agy) + ' ' + agyArgs.map(posixQuote).join(' ');
+  const ro = roProfile ? 'mkdir -p "$HOME/.gemini/antigravity-cli/' + RO_PROFILE + '" && printf %s ' + posixQuote(RO_SETTINGS) + ' > "$HOME/.gemini/antigravity-cli/' + RO_PROFILE + '/settings.json" && ' : '';
+  const script = ro + posixCd(cwd) + ' && printf ' + posixQuote(CWD_MARK + '%s\\n') + ' "$(pwd)" >&2 && printf ' + posixQuote(PID_MARK + '%s\\n') + ' "$$" >&2 && exec ' + posixExe(agy) + ' ' + agyArgs.map(posixQuote).join(' ');
   return { cmd: 'ssh', args: [...ssh, script], remote: true };
 }
 
