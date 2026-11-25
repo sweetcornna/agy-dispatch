@@ -74,6 +74,15 @@ test('watchdog: silent turn is cancelled, stuck agy is killed and the conversati
   cli(['stop', id]);
 });
 
+test('send --interrupt cancels the running turn and starts a new one', async () => {
+  const id = idOf(cli(['start', '--write', '--', 'slow']).out);
+  const r = cli(['send', id, '--interrupt', '--', 'normal interrupted']);
+  assert.match(r.out, /turn 2 started/, r.out);
+  assert.equal(JSON.parse(cli(['result', id, '--turn', '1', '--json']).out).record.stopReason, 'cancelled');
+  assert.match(cli(['wait', id]).out, /world: normal interrupted/);
+  cli(['stop', id]);
+});
+
 test('cancel stops a running turn but keeps the session', async () => {
   const id = idOf(cli(['start', '--write', '--', 'hang-cancellable']).out);
   const c = cli(['cancel', id]);
