@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "agy-dispatch",
+  "owner": {
+    "name": "Cornna"
+  },
+  "description": "agy (Antigravity CLI) dispatcher plugin for Claude Code.",
+  "plugins": [
+    {
+      "name": "agy",
+      "source": "./",
+      "description": "Run and supervise agy sessions locally or over SSH, as a live subagent.",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+# agy-dispatch
+
+A Claude Code plugin that drives **agy** (the Google Antigravity CLI) like a subagent, on this machine or on other machines over SSH.
+
+- **Live progress**: a background broker runs `agy acp` (Agent Client Protocol) and turns its stream into one line per event. Watch it with Claude Code's Monitor.
+- **Live conversation**: `send` while agy is working adds the message to the current turn, and agy picks it up at its next step. `--interrupt` cancels the turn first. agy's questions and approval requests come back to Claude (`answer`).
+- **No hangs**: a watchdog cancels a turn that goes silent and kills agy if it ignores the cancel. The broker then restarts agy and reloads the conversation, and it does the same after a crash or a dropped SSH link. Unanswered approvals are denied after a timeout. A host that isn't signed in fails in seconds instead of waiting on OAuth. `wait` and `run` never block longer than `--timeout`.
+- **Nothing runs when idle**: an idle session stops its agy process after 20 minutes (parked). `send` resumes it with its memory.
+- **Read-only by default**: plan mode, approvals denied, and workspace edits cancel the turn. `--write` allows edits and commands.
+- **Several machines**: `hosts add <name> --ssh <alias>` detects the OS (Linux, macOS or Windows PowerShell) and the agy path. The wire is ASCII-only JSON, so Chinese and quotes survive PowerShell 5.1.
+
+## Install
+
+```bash
+claude plugin marketplace add sweetcornna/agy-dispatch      # or a local checkout path
+claude plugin install agy@agy-dispatch
+```
+
+Requires Node 20+ and `agy` on each machine that runs sessions, signed in once (`agy`; over SSH: `ssh -t <alias> agy`).
+
+## Use in Claude Code
+
+| Command | What it does |
+|---|---|
+| `/agy:run [--host h] [--write] <task>` | one-shot task, returns agy's answer |
+| `/agy:start [--host h] [--write] <task>` | background session plus a live Monitor feed |
+| `/agy:send <id> [--interrupt] <msg>` | talk to a session (steer, answer a question, resume) |
+| `/agy:status [id]`, `/agy:result <id>` | sessions table or details; latest reply |
+| `/agy:cancel <id>`, `/agy:stop <id>|--all` | cancel the turn; end the session |
+| `/agy:hosts [doctor|add|rm]` | manage machines; check reachability and sign-in |
+
+The `agy` skill also triggers on plain requests ("让 agy 在 Windows 上把测试跑一遍", "ask agy to review this").
+
+## CLI
+
+`node scripts/agy.mjs help` prints the full reference. State lives in `~/.agy-dispatch/` (`hosts.json`, `sessions/<id>/`), or in `$AGY_DISPATCH_HOME` if set.
+
+```bash
+node scripts/agy.mjs hosts add win --ssh my-windows-box --cwd 'C:\\src'
+node scripts/agy.mjs doctor
+node scripts/agy.mjs start --host win --write - <<'EOF'
+Run the test suite in C:\src\app and fix what fails.
+EOF
+node scripts/agy.mjs watch win-ab3cd          # live lines; ends when the session stops
+node scripts/agy.mjs send win-ab3cd -- "skip the flaky network tests"
+node scripts/agy.mjs result win-ab3cd
+```
+
+Watchdog flags: `--idle-timeout 10m --tool-timeout 30m --turn-timeout 3h --ask-timeout 15m --startup-timeout 2m --idle-exit 20m`.
+
+## Tests
+
+`npm test` runs the broker against a scripted fake agy (`tests/fake-agy.mjs`), covering stalls, kill and reload, crashes, approvals and their timeouts, read-only violations, mid-turn messages, parking and resume, and sign-in failure. It uses no agy quota.
