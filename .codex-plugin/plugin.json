@@ -1,0 +1,36 @@
+{
+  "name": "agy",
+  "version": "0.3.0",
+  "description": "Drive agy (Google Antigravity CLI) from Codex like a subagent, on this machine or over SSH on others: live progress, mid-turn messages, approvals, stall watchdog, auto-recovery.",
+  "author": {
+    "name": "Cornna",
+    "url": "https://github.com/sweetcornna"
+  },
+  "repository": "https://github.com/sweetcornna/agy-dispatch",
+  "license": "MIT",
+  "keywords": [
+    "agy",
+    "antigravity",
+    "gemini",
+    "subagent",
+    "acp",
+    "ssh",
+    "remote"
+  ],
+  "skills": "./codex/skills/",
+  "interface": {
+    "displayName": "agy dispatch",
+    "shortDescription": "Run and supervise agy (Antigravity CLI) sessions here or on other machines",
+    "longDescription": "Hand tasks to agy and supervise it like a subagent: stream its progress, steer it mid-turn, answer its approvals, cancel or resume. A background broker keeps agy from hanging (watchdog, kill and reload, auto-recovery) and enforces read-only sessions by default. Works locally and over SSH on Linux, macOS and Windows hosts.",
+    "developerName": "Cornna",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "让 agy 看一下这个仓库的测试为什么失败"
+    ]
+  }
+}

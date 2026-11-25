@@ -4,13 +4,13 @@
   "owner": {
     "name": "Cornna"
   },
-  "description": "agy (Antigravity CLI) dispatcher plugin for Claude Code.",
+  "description": "agy (Antigravity CLI) dispatcher plugin for Claude Code and Codex.",
   "plugins": [
     {
       "name": "agy",
       "source": "./",
       "description": "Run and supervise agy sessions locally or over SSH, as a live subagent.",
-      "version": "0.2.0"
+      "version": "0.3.0"
     }
   ]
 }

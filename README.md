@@ -1,6 +1,6 @@
 # agy-dispatch
 
-A Claude Code plugin that drives **agy** (the Google Antigravity CLI) like a subagent, on this machine or on other machines over SSH.
+A plugin for **Claude Code** and **Codex** that drives **agy** (the Google Antigravity CLI) like a subagent, on this machine or on other machines over SSH.
 
 - **Live progress**: a background broker runs `agy acp` (Agent Client Protocol) and turns its stream into one line per event. Watch it with Claude Code's Monitor.
 - **Live conversation**: `send` while agy is working adds the message to the current turn, and agy picks it up at its next step. `--interrupt` cancels the turn first. agy's questions and approval requests come back to Claude (`answer`).
@@ -11,10 +11,21 @@ A Claude Code plugin that drives **agy** (the Google Antigravity CLI) like a sub
 
 ## Install
 
+Claude Code:
+
 ```bash
 claude plugin marketplace add sweetcornna/agy-dispatch      # or a local checkout path
 claude plugin install agy@agy-dispatch
 ```
+
+Codex (0.17x and later, which reads `.codex-plugin/plugin.json`):
+
+```bash
+codex plugin marketplace add sweetcornna/agy-dispatch
+codex plugin add agy@agy-dispatch
+```
+
+Codex gets the `agy` skill (`codex/skills/agy`). Ask in plain words, for example "用 agy 看看这个 bug" or "让 agy 在 labcage 上跑测试". The dispatcher starts background processes, writes `~/.agy-dispatch`, and uses the network and SSH, so Codex must run it outside its sandbox: `danger-full-access`, or escalated commands.
 
 Requires Node 20+ and `agy` on each machine that runs sessions, signed in once (`agy`; over SSH: `ssh -t <alias> agy`).
 
