@@ -1,0 +1,7 @@
+# agy-dispatch for dsh: one plugin line that registers the agy skill.
+# Use without installing:   dsh headless --patch <checkout>/dsh/cordis.patch.yml "..."
+# Or install into a profile: dsh plugin --profile <name> add <checkout>/dsh
+# ./ paths resolve against this file's directory.
+- insert:
+    - id: agy-dispatch
+      name: ./index.mjs

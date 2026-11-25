@@ -5,7 +5,7 @@ import { getHost, agySpawnSpec, sshCapture, loginHint, writeLocalRoProfile, CWD_
 import { Rpc } from './acp.mjs';
 import { IS_WIN, killTree, oneLine, fmtDur, sleep, isAlive } from './util.mjs';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 const RO_NOTE = '[agy-dispatch: this session is read-only. Editing files is denied. Shell commands are allowed only if they are plain read-only ones (ls, cat, rg/grep, git status/diff/log/show), one per call, without &&, ;, | or redirection; anything else is denied. Work with read-only tools and say what you would change instead of changing it.]';
 const RO_CONTINUE = '[agy-dispatch: that action was denied because this session is read-only. Carry on with read-only tools (file viewing and search; plain read-only shell commands one per call, without &&, ;, | or redirection), then give your answer, including what you could not do.]';
 const RAW_CAP = 20 * 1024 * 1024;

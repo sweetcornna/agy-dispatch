@@ -1,6 +1,6 @@
 # agy-dispatch
 
-A plugin for **Claude Code** and **Codex** that drives **agy** (the Google Antigravity CLI) like a subagent, on this machine or on other machines over SSH.
+One repo, three hosts: plugins for **Claude Code**, **Codex** and **DeepSeek Harness (dsh)** that all share one dispatcher (`scripts/agy.mjs`) and drive **agy** (the Google Antigravity CLI) like a subagent, on this machine or on other machines over SSH.
 
 - **Live progress**: a background broker runs `agy acp` (Agent Client Protocol) and turns its stream into one line per event. Watch it with Claude Code's Monitor.
 - **Live conversation**: `send` while agy is working adds the message to the current turn, and agy picks it up at its next step. `--interrupt` cancels the turn first. agy's questions and approval requests come back to Claude (`answer`).
@@ -24,6 +24,18 @@ Codex (0.17x and later, which reads `.codex-plugin/plugin.json`):
 codex plugin marketplace add sweetcornna/agy-dispatch
 codex plugin add agy@agy-dispatch
 ```
+
+DeepSeek Harness (dsh 0.2.2+), any of:
+
+```bash
+node <checkout>/dsh/install-skill.mjs                 # skill for every profile: ~/.dsh/skills/agy/SKILL.md
+dsh headless --patch <checkout>/dsh/cordis.patch.yml "..."   # per run, nothing installed
+dsh plugin --profile <name> add <checkout>/dsh        # into one profile (needs pnpm)
+```
+
+The dsh side is a Cordis plugin (`dsh/index.mjs`) that registers the `agy` skill with `ctx.skills.register`, or the same skill written as a filesystem skill. The skill text holds the absolute path of this checkout's dispatcher, so rerun `install-skill.mjs` after moving the checkout. dsh moves a foreground command that outlives its timeout to a background job, so the skill tells the model to run `wait`/`watch` with `run_in_background` and read them with `job_output`.
+
+Layout: `scripts/` (shared dispatcher and broker), `commands/` + `skills/` + `.claude-plugin/` (Claude Code), `codex/` + `.codex-plugin/` (Codex), `dsh/` (dsh).
 
 Codex gets the `agy` skill (`codex/skills/agy`). Ask in plain words, for example "用 agy 看看这个 bug" or "让 agy 在 labcage 上跑测试". The dispatcher starts background processes, writes `~/.agy-dispatch`, and uses the network and SSH, so Codex must run it outside its sandbox: `danger-full-access`, or escalated commands.
 
@@ -61,4 +73,4 @@ Watchdog flags: `--idle-timeout 10m --tool-timeout 30m --turn-timeout 3h --ask-t
 
 ## Tests
 
-`npm test` runs the broker against a scripted fake agy (`tests/fake-agy.mjs`), covering stalls, kill and reload, crashes, approvals and their timeouts, read-only violations, mid-turn messages, parking and resume, and sign-in failure. It uses no agy quota.
+`npm test` runs the broker against a scripted fake agy (`tests/fake-agy.mjs`), covering stalls, kill and reload, crashes, approvals and their timeouts, read-only violations, mid-turn messages, parking and resume, and sign-in failure. It uses no agy quota. `dsh/test/` checks the dsh plugin (skill registration, path quoting, install and uninstall).

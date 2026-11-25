@@ -10,7 +10,7 @@
       "name": "agy",
       "source": "./",
       "description": "Run and supervise agy sessions locally or over SSH, as a live subagent.",
-      "version": "0.3.0"
+      "version": "0.4.0"
     }
   ]
 }
